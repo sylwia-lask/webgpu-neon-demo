@@ -42,7 +42,6 @@ function float32ToFloat16(value: number): number {
   return sign | (newExp << 10) | (mantissa >> 13);
 }
 
-
 type MouseState = {
   x: number;
   y: number;
@@ -188,10 +187,13 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
       const splatShaderModule = device.createShaderModule({
         code: `
+// ====== RAINBOW SPLAT SHADER ======
+
 struct Mouse {
-  pos : vec2<f32>,
-  down : f32,
+  pos    : vec2<f32>,
+  down   : f32,
   radius : f32,
+  time   : f32,
 };
 
 @group(0) @binding(0)
@@ -203,6 +205,25 @@ var dstTex : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2)
 var srcTex : texture_2d<f32>;
 
+// pomocnicze funkcje HSL -> RGB, inspirowane JS-ową wersją z drugiego snippetu
+
+fn hsl_k(n: f32, h: f32) -> f32 {
+  return (n + h * 12.0) % 12.0;
+}
+
+fn hsl_f(n: f32, h: f32, s: f32, l: f32) -> f32 {
+  let a = s * min(l, 1.0 - l);
+  let k = hsl_k(n, h);
+  return l - a * max(-1.0, min(k - 3.0, min(9.0 - k, 1.0)));
+}
+
+fn hsl2rgb(h: f32, s: f32, l: f32) -> vec3<f32> {
+  let r = hsl_f(0.0, h, s, l);
+  let g = hsl_f(8.0, h, s, l);
+  let b = hsl_f(4.0, h, s, l);
+  return vec3<f32>(r, g, b);
+}
+
 @compute @workgroup_size(8, 8)
 fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let dims = textureDimensions(dstTex);
@@ -213,20 +234,24 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let coord = vec2<f32>(f32(gid.x), f32(gid.y));
   let base = textureLoad(srcTex, vec2<i32>(i32(coord.x), i32(coord.y)), 0);
 
-    var color = base;
+  var color = base;
 
   if (uMouse.down > 0.5) {
     let d = distance(coord, uMouse.pos);
     if (d < uMouse.radius) {
       let t = 1.0 - (d / uMouse.radius);
-      let ink = vec3<f32>(0.0, 0.4, 1.0); // blue
+
+      // tęczowy hue zależny od czasu + pozycji
+      let hue = fract(uMouse.time * 0.2 + coord.x / f32(dims.x));
+      let rgb = hsl2rgb(hue, 0.95, 0.55);
+
+      let ink = rgb;
       let mixed = mix(color.rgb, ink, t);
       color = vec4<f32>(mixed, color.a);
     }
   }
 
   textureStore(dstTex, vec2<i32>(i32(coord.x), i32(coord.y)), color);
-
 }
         `,
       });
@@ -283,8 +308,10 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
         ],
       });
 
+      // Mouse: vec2 + 3 scalary (down, radius, time) => 5 floatów,
+      // ale rozmiar zaokrąglamy do 32 bajtów (wymóg wyrównania).
       mouseBuffer = device.createBuffer({
-        size: 16, // vec2 + 2 floats
+        size: 32,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
@@ -309,43 +336,39 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
       // -------------------- SEED DATA --------------------
 
-      // -------------------- SEED DATA --------------------
+      const seedData = new Uint16Array(SIM_WIDTH * SIM_HEIGHT * 4);
 
-// dla rgba16float: 4 kanały * 2 bajty na piksel
-const seedData = new Uint16Array(SIM_WIDTH * SIM_HEIGHT * 4);
+      for (let y = 0; y < SIM_HEIGHT; y++) {
+        for (let x = 0; x < SIM_WIDTH; x++) {
+          const i = (y * SIM_WIDTH + x) * 4;
 
-for (let y = 0; y < SIM_HEIGHT; y++) {
-  for (let x = 0; x < SIM_WIDTH; x++) {
-    const i = (y * SIM_WIDTH + x) * 4;
+          // czysta biel: (1, 1, 1, 1)
+          seedData[i + 0] = float32ToFloat16(1.0); // R
+          seedData[i + 1] = float32ToFloat16(1.0); // G
+          seedData[i + 2] = float32ToFloat16(1.0); // B
+          seedData[i + 3] = float32ToFloat16(1.0); // A
+        }
+      }
 
-    // czysta biel: (1, 1, 1, 1)
-    seedData[i + 0] = float32ToFloat16(1.0); // R
-    seedData[i + 1] = float32ToFloat16(1.0); // G
-    seedData[i + 2] = float32ToFloat16(1.0); // B
-    seedData[i + 3] = float32ToFloat16(1.0); // A
-  }
-}
+      const writeTex = (texture: GPUTexture) => {
+        device!.queue.writeTexture(
+          { texture },
+          seedData,
+          {
+            offset: 0,
+            bytesPerRow: SIM_WIDTH * 4 * 2, // 4 kanały * 2 bajty
+            rowsPerImage: SIM_HEIGHT,
+          },
+          {
+            width: SIM_WIDTH,
+            height: SIM_HEIGHT,
+            depthOrArrayLayers: 1,
+          }
+        );
+      };
 
-const writeTex = (texture: GPUTexture) => {
-  device!.queue.writeTexture(
-    { texture },
-    seedData,
-    {
-      offset: 0,
-      bytesPerRow: SIM_WIDTH * 4 * 2, // 4 kanały * 2 bajty (rgba16float)
-      rowsPerImage: SIM_HEIGHT,
-    },
-    {
-      width: SIM_WIDTH,
-      height: SIM_HEIGHT,
-      depthOrArrayLayers: 1,
-    }
-  );
-};
-
-writeTex(simTexture);
-writeTex(scratchTexture);
-
+      writeTex(simTexture);
+      writeTex(scratchTexture);
 
       // -------------------- SAMPLER + BIND GROUPS --------------------
 
@@ -369,17 +392,8 @@ writeTex(scratchTexture);
       blurBindGroup = device.createBindGroup({
         layout: blurLayout,
         entries: [
-          { binding: 0, resource: scratchViewSample! }, // src
-          { binding: 1, resource: scratchViewStorage! }, // dst? wait
-        ],
-      });
-
-      // poprawka: blur powinien czytać ze scratch i pisać do sim
-      blurBindGroup = device.createBindGroup({
-        layout: blurLayout,
-        entries: [
-          { binding: 0, resource: scratchViewSample! },   // srcTex
-          { binding: 1, resource: simViewStorage! },      // dstTex
+          { binding: 0, resource: scratchViewSample! }, // srcTex
+          { binding: 1, resource: simViewStorage! },    // dstTex
         ],
       });
 
@@ -388,7 +402,7 @@ writeTex(scratchTexture);
         layout: splatLayout,
         entries: [
           { binding: 0, resource: { buffer: mouseBuffer } }, // uMouse
-          { binding: 1, resource: scratchViewStorage! },      // dstTex
+          { binding: 1, resource: scratchViewStorage! },     // dstTex
           { binding: 2, resource: simViewSample! },          // srcTex
         ],
       });
@@ -466,12 +480,15 @@ writeTex(scratchTexture);
 
         updateCanvasSizeAndResolution();
 
-        // update mouse uniform
+        const timeSeconds = performance.now() / 1000;
+
+        // mouse uniform: x, y, down, radius, time
         const mouseData = new Float32Array([
           mouse.x,
           mouse.y,
           mouse.down ? 1.0 : 0.0,
-          25.0, // radius
+          25.0,
+          timeSeconds,
         ]);
         device.queue.writeBuffer(mouseBuffer, 0, mouseData.buffer);
 
@@ -480,7 +497,7 @@ writeTex(scratchTexture);
         const workgroupCountX = Math.ceil(SIM_WIDTH / 8);
         const workgroupCountY = Math.ceil(SIM_HEIGHT / 8);
 
-        // compute pass: splat into scratch, then blur scratch -> sim
+        // compute pass: splat -> blur
         const computePass = encoder.beginComputePass();
         computePass.setPipeline(splatPipeline);
         computePass.setBindGroup(0, splatBindGroup);
@@ -491,7 +508,7 @@ writeTex(scratchTexture);
         computePass.dispatchWorkgroups(workgroupCountX, workgroupCountY);
         computePass.end();
 
-        // render pass: draw sim texture
+        // render pass
         const textureView = context.getCurrentTexture().createView();
         const renderPass = encoder.beginRenderPass({
           colorAttachments: [
@@ -517,7 +534,7 @@ writeTex(scratchTexture);
 
       rafId = requestAnimationFrame(frame);
 
-      // cleanup
+      // cleanup z init
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);
         removeMouse && removeMouse();
@@ -539,7 +556,7 @@ writeTex(scratchTexture);
         <header className="flex items-center justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.2em] text-slate-400">WebGPU</p>
-            <h1 className="text-3xl font-semibold">Tailwind Fluid Demo</h1>
+            <h1 className="text-3xl font-semibold">Rainbow Fluid Demo</h1>
           </div>
           <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-200 border border-emerald-800">
             Live
@@ -558,7 +575,7 @@ writeTex(scratchTexture);
         )}
 
         <p className="text-sm text-slate-400">
-          If you see nothing, try Chrome/Edge with WebGPU enabled in browser flags.
+          Jeśli nic nie widać, spróbuj w Chrome/Edge z włączonym WebGPU w flagach.
         </p>
       </div>
     </div>
