@@ -8,7 +8,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "types": ["vite/client"],
+    "types": ["@webgpu/types","vite/client"],
   }
   
 }

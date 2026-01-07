@@ -22,7 +22,7 @@ function float32ToFloat16(value: number): number {
     return sign | 0x7c00;
   }
 
-  let newExp = exp - 127 + 15;
+  const newExp = exp - 127 + 15;
   if (newExp >= 0x1f) {
     return sign | 0x7c00;
   }
