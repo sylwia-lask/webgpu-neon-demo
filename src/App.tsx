@@ -4,6 +4,45 @@ import './App.css';
 const SIM_WIDTH = 256;
 const SIM_HEIGHT = 256;
 
+// konwersja liczby JS (float32) na 16-bitowy float do rgba16float
+function float32ToFloat16(value: number): number {
+  const floatView = new Float32Array(1);
+  const intView = new Uint32Array(floatView.buffer);
+
+  floatView[0] = value;
+  const x = intView[0];
+
+  const sign = (x >> 16) & 0x8000;
+  const mantissa = x & 0x7fffff;
+  const exp = (x >> 23) & 0xff;
+
+  if (exp === 0) {
+    // zero / subnormal -> 0
+    return sign;
+  }
+  if (exp === 0xff) {
+    // inf / NaN
+    return sign | 0x7c00;
+  }
+
+  let newExp = exp - 127 + 15;
+  if (newExp >= 0x1f) {
+    // overflow -> inf
+    return sign | 0x7c00;
+  }
+  if (newExp <= 0) {
+    // subnormal
+    if (newExp < -10) {
+      return sign;
+    }
+    const subMantissa = (mantissa | 0x800000) >> (1 - newExp);
+    return sign | (subMantissa >> 13);
+  }
+
+  return sign | (newExp << 10) | (mantissa >> 13);
+}
+
+
 type MouseState = {
   x: number;
   y: number;
@@ -180,7 +219,7 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
     let d = distance(coord, uMouse.pos);
     if (d < uMouse.radius) {
       let t = 1.0 - (d / uMouse.radius);
-      let ink = vec3<f32>(1.0, 0.2, 0.1); // warm ink color
+      let ink = vec3<f32>(0.0, 0.4, 1.0); // blue
       let mixed = mix(color.rgb, ink, t);
       color = vec4<f32>(mixed, color.a);
     }
@@ -270,43 +309,43 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
       // -------------------- SEED DATA --------------------
 
-      const seedData = new Float32Array(SIM_WIDTH * SIM_HEIGHT * 4);
-      for (let y = 0; y < SIM_HEIGHT; y++) {
-        for (let x = 0; x < SIM_WIDTH; x++) {
-          const i = (y * SIM_WIDTH + x) * 4;
-          const u = x / (SIM_WIDTH - 1);
-          const v = y / (SIM_HEIGHT - 1);
+      // -------------------- SEED DATA --------------------
 
-          const dx = u - 0.5;
-          const dy = v - 0.5;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+// dla rgba16float: 4 kanały * 2 bajty na piksel
+const seedData = new Uint16Array(SIM_WIDTH * SIM_HEIGHT * 4);
 
-          seedData[i + 0] = 0.2 + 0.8 * Math.exp(-dist * 10.0);
-          seedData[i + 1] = 0.4 + 0.6 * u;
-          seedData[i + 2] = 0.6 + 0.4 * v;
-          seedData[i + 3] = 1.0;
-        }
-      }
+for (let y = 0; y < SIM_HEIGHT; y++) {
+  for (let x = 0; x < SIM_WIDTH; x++) {
+    const i = (y * SIM_WIDTH + x) * 4;
 
-      const writeTex = (texture: GPUTexture) => {
-        device!.queue.writeTexture(
-          { texture },
-          seedData,
-          {
-            offset: 0,
-            bytesPerRow: SIM_WIDTH * 4 * 4,
-            rowsPerImage: SIM_HEIGHT,
-          },
-          {
-            width: SIM_WIDTH,
-            height: SIM_HEIGHT,
-            depthOrArrayLayers: 1,
-          }
-        );
-      };
+    // czysta biel: (1, 1, 1, 1)
+    seedData[i + 0] = float32ToFloat16(1.0); // R
+    seedData[i + 1] = float32ToFloat16(1.0); // G
+    seedData[i + 2] = float32ToFloat16(1.0); // B
+    seedData[i + 3] = float32ToFloat16(1.0); // A
+  }
+}
 
-      writeTex(simTexture);
-      writeTex(scratchTexture);
+const writeTex = (texture: GPUTexture) => {
+  device!.queue.writeTexture(
+    { texture },
+    seedData,
+    {
+      offset: 0,
+      bytesPerRow: SIM_WIDTH * 4 * 2, // 4 kanały * 2 bajty (rgba16float)
+      rowsPerImage: SIM_HEIGHT,
+    },
+    {
+      width: SIM_WIDTH,
+      height: SIM_HEIGHT,
+      depthOrArrayLayers: 1,
+    }
+  );
+};
+
+writeTex(simTexture);
+writeTex(scratchTexture);
+
 
       // -------------------- SAMPLER + BIND GROUPS --------------------
 
