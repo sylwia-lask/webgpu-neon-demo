@@ -4,7 +4,6 @@ import './App.css';
 const SIM_WIDTH = 256;
 const SIM_HEIGHT = 256;
 
-// konwersja liczby JS (float32) na 16-bitowy float do rgba16float
 function float32ToFloat16(value: number): number {
   const floatView = new Float32Array(1);
   const intView = new Uint32Array(floatView.buffer);
@@ -17,21 +16,17 @@ function float32ToFloat16(value: number): number {
   const exp = (x >> 23) & 0xff;
 
   if (exp === 0) {
-    // zero / subnormal -> 0
     return sign;
   }
   if (exp === 0xff) {
-    // inf / NaN
     return sign | 0x7c00;
   }
 
   let newExp = exp - 127 + 15;
   if (newExp >= 0x1f) {
-    // overflow -> inf
     return sign | 0x7c00;
   }
   if (newExp <= 0) {
-    // subnormal
     if (newExp < -10) {
       return sign;
     }
@@ -66,6 +61,7 @@ function App() {
     let resolutionBindGroup: GPUBindGroup | null = null;
 
     let mouseBuffer: GPUBuffer | null = null;
+    let timeBuffer: GPUBuffer | null = null;
 
     let simTexture: GPUTexture | null = null;
     let simViewSample: GPUTextureView | null = null;
@@ -112,8 +108,6 @@ function App() {
         alphaMode: 'premultiplied',
       });
 
-      // -------------------- SHADERS --------------------
-
       const renderShaderModule = device.createShaderModule({
         code: `
 @group(0) @binding(0)
@@ -139,8 +133,14 @@ fn vs_main(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4<
 @fragment
 fn fs_main(@builtin(position) fragCoord : vec4<f32>) -> @location(0) vec4<f32> {
     let uv = fragCoord.xy / uResolution;
-    let color = textureSample(uTexture, uSampler, uv);
-    return vec4<f32>(color.rgb, 1.0);
+    let texColor = textureSample(uTexture, uSampler, uv);
+
+    var c = texColor.rgb;
+    let intensity = max(max(c.r, c.g), c.b);
+    c = c * (1.2 + intensity * 1.6);
+    c = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+
+    return vec4<f32>(c, 1.0);
 }
         `,
       });
@@ -152,6 +152,14 @@ var srcTex : texture_2d<f32>;
 
 @group(0) @binding(1)
 var dstTex : texture_storage_2d<rgba16float, write>;
+
+struct TimeUniform {
+  value : f32,
+  pad   : vec3<f32>,
+};
+
+@group(0) @binding(2)
+var<uniform> uTime : TimeUniform;
 
 fn sample_tex(coord : vec2<i32>) -> vec4<f32> {
     let dims = textureDimensions(srcTex);
@@ -171,24 +179,30 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
     let coord = vec2<i32>(i32(gid.x), i32(gid.y));
 
-    let center = sample_tex(coord);
-    let left   = sample_tex(coord + vec2<i32>(-1,  0));
-    let right  = sample_tex(coord + vec2<i32>( 1,  0));
-    let up     = sample_tex(coord + vec2<i32>( 0, -1));
-    let down   = sample_tex(coord + vec2<i32>( 0,  1));
+    let uv = vec2<f32>(f32(gid.x), f32(gid.y)) / vec2<f32>(f32(dims.x), f32(dims.y));
+    let angle = sin(uv.x * 9.0 + uTime.value * 1.4) + cos(uv.y * 11.0 - uTime.value * 1.2);
+    let dir = vec2<f32>(-sin(angle), cos(angle));
+    let swirlStrength = 0.9;
+    let swirlOffset = vec2<i32>(i32(dir.x * swirlStrength), i32(dir.y * swirlStrength));
 
-    // Slightly biased towards center so it doesn't flatten too fast
+    let center = sample_tex(coord + swirlOffset);
+    let left   = sample_tex(coord + swirlOffset + vec2<i32>(-1,  0));
+    let right  = sample_tex(coord + swirlOffset + vec2<i32>( 1,  0));
+    let up     = sample_tex(coord + swirlOffset + vec2<i32>( 0, -1));
+    let down   = sample_tex(coord + swirlOffset + vec2<i32>( 0,  1));
+
     let avg = (center * 4.0 + left + right + up + down) / 8.0;
 
-    textureStore(dstTex, coord, avg);
+    let fade = 0.985;
+    let faded = vec4<f32>(avg.rgb * fade, avg.a);
+
+    textureStore(dstTex, coord, faded);
 }
         `,
       });
 
       const splatShaderModule = device.createShaderModule({
         code: `
-// ====== RAINBOW SPLAT SHADER ======
-
 struct Mouse {
   pos    : vec2<f32>,
   down   : f32,
@@ -204,8 +218,6 @@ var dstTex : texture_storage_2d<rgba16float, write>;
 
 @group(0) @binding(2)
 var srcTex : texture_2d<f32>;
-
-// pomocnicze funkcje HSL -> RGB, inspirowane JS-ową wersją z drugiego snippetu
 
 fn hsl_k(n: f32, h: f32) -> f32 {
   return (n + h * 12.0) % 12.0;
@@ -239,15 +251,15 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (uMouse.down > 0.5) {
     let d = distance(coord, uMouse.pos);
     if (d < uMouse.radius) {
-      let t = 1.0 - (d / uMouse.radius);
+      let falloff = 1.0 - (d / uMouse.radius);
 
-      // tęczowy hue zależny od czasu + pozycji
-      let hue = fract(uMouse.time * 0.2 + coord.x / f32(dims.x));
+      let hue = fract(uMouse.time * 0.25 + coord.x / f32(dims.x));
       let rgb = hsl2rgb(hue, 0.95, 0.55);
 
-      let ink = rgb;
-      let mixed = mix(color.rgb, ink, t);
-      color = vec4<f32>(mixed, color.a);
+      var newColor = color.rgb + rgb * falloff * 1.4;
+      newColor = clamp(newColor, vec3<f32>(0.0), vec3<f32>(3.0));
+
+      color = vec4<f32>(newColor, color.a);
     }
   }
 
@@ -255,8 +267,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 }
         `,
       });
-
-      // -------------------- PIPELINES --------------------
 
       renderPipeline = device.createRenderPipeline({
         layout: 'auto',
@@ -290,8 +300,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
         },
       });
 
-      // -------------------- BUFFERS --------------------
-
       resolutionBuffer = device.createBuffer({
         size: 8,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -308,14 +316,15 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
         ],
       });
 
-      // Mouse: vec2 + 3 scalary (down, radius, time) => 5 floatów,
-      // ale rozmiar zaokrąglamy do 32 bajtów (wymóg wyrównania).
       mouseBuffer = device.createBuffer({
         size: 32,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
-      // -------------------- TEXTURES --------------------
+      timeBuffer = device.createBuffer({
+        size: 32, // <-- changed from 16 to 32
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
 
       const texDesc: GPUTextureDescriptor = {
         size: { width: SIM_WIDTH, height: SIM_HEIGHT, depthOrArrayLayers: 1 },
@@ -334,19 +343,16 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
       scratchViewSample = scratchTexture.createView();
       scratchViewStorage = scratchTexture.createView();
 
-      // -------------------- SEED DATA --------------------
-
       const seedData = new Uint16Array(SIM_WIDTH * SIM_HEIGHT * 4);
 
       for (let y = 0; y < SIM_HEIGHT; y++) {
         for (let x = 0; x < SIM_WIDTH; x++) {
           const i = (y * SIM_WIDTH + x) * 4;
 
-          // czysta biel: (1, 1, 1, 1)
-          seedData[i + 0] = float32ToFloat16(1.0); // R
-          seedData[i + 1] = float32ToFloat16(1.0); // G
-          seedData[i + 2] = float32ToFloat16(1.0); // B
-          seedData[i + 3] = float32ToFloat16(1.0); // A
+          seedData[i + 0] = float32ToFloat16(0.0);
+          seedData[i + 1] = float32ToFloat16(0.0);
+          seedData[i + 2] = float32ToFloat16(0.0);
+          seedData[i + 3] = float32ToFloat16(1.0);
         }
       }
 
@@ -356,7 +362,7 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
           seedData,
           {
             offset: 0,
-            bytesPerRow: SIM_WIDTH * 4 * 2, // 4 kanały * 2 bajty
+            bytesPerRow: SIM_WIDTH * 4 * 2,
             rowsPerImage: SIM_HEIGHT,
           },
           {
@@ -369,8 +375,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
       writeTex(simTexture);
       writeTex(scratchTexture);
-
-      // -------------------- SAMPLER + BIND GROUPS --------------------
 
       sampler = device.createSampler({
         magFilter: 'linear',
@@ -392,8 +396,9 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
       blurBindGroup = device.createBindGroup({
         layout: blurLayout,
         entries: [
-          { binding: 0, resource: scratchViewSample! }, // srcTex
-          { binding: 1, resource: simViewStorage! },    // dstTex
+          { binding: 0, resource: scratchViewSample! },
+          { binding: 1, resource: simViewStorage! },
+          { binding: 2, resource: { buffer: timeBuffer } },
         ],
       });
 
@@ -401,13 +406,11 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
       splatBindGroup = device.createBindGroup({
         layout: splatLayout,
         entries: [
-          { binding: 0, resource: { buffer: mouseBuffer } }, // uMouse
-          { binding: 1, resource: scratchViewStorage! },     // dstTex
-          { binding: 2, resource: simViewSample! },          // srcTex
+          { binding: 0, resource: { buffer: mouseBuffer } },
+          { binding: 1, resource: scratchViewStorage! },
+          { binding: 2, resource: simViewSample! },
         ],
       });
-
-      // -------------------- MOUSE EVENTS --------------------
 
       const setupMouse = () => {
         const canvasEl = canvasRef.current;
@@ -425,7 +428,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
           const rect = canvasEl.getBoundingClientRect();
           const nx = (e.clientX - rect.left) / rect.width;
           const ny = (e.clientY - rect.top) / rect.height;
-          // map to simulation grid space
           mouse.x = nx * SIM_WIDTH;
           mouse.y = ny * SIM_HEIGHT;
         };
@@ -442,8 +444,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
       };
 
       const removeMouse = setupMouse();
-
-      // -------------------- RENDER LOOP --------------------
 
       const updateCanvasSizeAndResolution = () => {
         if (!canvasRef.current || !device || !resolutionBuffer) return;
@@ -473,7 +473,8 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
           !renderBindGroup ||
           !blurBindGroup ||
           !splatBindGroup ||
-          !mouseBuffer
+          !mouseBuffer ||
+          !timeBuffer
         ) {
           return;
         }
@@ -482,22 +483,23 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
         const timeSeconds = performance.now() / 1000;
 
-        // mouse uniform: x, y, down, radius, time
         const mouseData = new Float32Array([
           mouse.x,
           mouse.y,
           mouse.down ? 1.0 : 0.0,
-          25.0,
+          18.0,
           timeSeconds,
         ]);
         device.queue.writeBuffer(mouseBuffer, 0, mouseData.buffer);
+
+        const timeData = new Float32Array([timeSeconds, 0, 0, 0]);
+        device.queue.writeBuffer(timeBuffer, 0, timeData.buffer);
 
         const encoder = device.createCommandEncoder();
 
         const workgroupCountX = Math.ceil(SIM_WIDTH / 8);
         const workgroupCountY = Math.ceil(SIM_HEIGHT / 8);
 
-        // compute pass: splat -> blur
         const computePass = encoder.beginComputePass();
         computePass.setPipeline(splatPipeline);
         computePass.setBindGroup(0, splatBindGroup);
@@ -508,7 +510,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
         computePass.dispatchWorkgroups(workgroupCountX, workgroupCountY);
         computePass.end();
 
-        // render pass
         const textureView = context.getCurrentTexture().createView();
         const renderPass = encoder.beginRenderPass({
           colorAttachments: [
@@ -534,7 +535,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
       rafId = requestAnimationFrame(frame);
 
-      // cleanup z init
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);
         removeMouse && removeMouse();
@@ -556,16 +556,16 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
         <header className="flex items-center justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.2em] text-slate-400">WebGPU</p>
-            <h1 className="text-3xl font-semibold">Rainbow Fluid Demo</h1>
+            <h1 className="text-3xl font-semibold">Neon Smoke Fluid</h1>
           </div>
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-200 border border-emerald-800">
+          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-fuchsia-900/40 text-fuchsia-200 border border-fuchsia-800">
             Live
           </span>
         </header>
 
-        <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-800/60 shadow-2xl shadow-emerald-900/20">
+        <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-800/60 shadow-[0_0_120px_rgba(236,72,153,0.4)]">
           <canvas ref={canvasRef} className="h-full w-full block" />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-slate-950/50 via-transparent to-emerald-500/10" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-slate-950/70 via-transparent to-fuchsia-500/10" />
         </div>
 
         {error && (
@@ -575,7 +575,7 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
         )}
 
         <p className="text-sm text-slate-400">
-          Jeśli nic nie widać, spróbuj w Chrome/Edge z włączonym WebGPU w flagach.
+          If you see nothing, try Chrome or Edge with WebGPU enabled in browser flags.
         </p>
       </div>
     </div>
