@@ -44,7 +44,7 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
   let avg = (center * 4.0 + left + right + up + down) / 8.0;
 
-  let fade = 0.985;
+  let fade = 0.990;
   let faded = vec4<f32>(avg.rgb * fade, avg.a);
 
   textureStore(dstTex, coord, faded);
