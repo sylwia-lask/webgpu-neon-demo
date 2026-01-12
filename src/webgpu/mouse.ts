@@ -36,11 +36,18 @@ export function useSimMouse(
     canvas.addEventListener("mouseenter", onEnter);
     canvas.addEventListener("mouseleave", onLeave);
     canvas.addEventListener("mousemove", onMove);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerenter", onEnter);
+    canvas.addEventListener("pointerleave", onLeave);
+    canvas.style.touchAction = "none";
 
     return () => {
       canvas.removeEventListener("mouseenter", onEnter);
       canvas.removeEventListener("mouseleave", onLeave);
       canvas.removeEventListener("mousemove", onMove);
+      canvas.addEventListener("pointermove", onMove);
+      canvas.addEventListener("pointerenter", onEnter);
+      canvas.addEventListener("pointerleave", onLeave);
     };
   }, [canvasRef, simWidth, simHeight]);
 
