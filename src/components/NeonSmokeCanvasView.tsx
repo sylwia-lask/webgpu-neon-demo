@@ -2,17 +2,29 @@ import { useEffect, useRef, useState } from "react";
 import { NeonSmokeRenderer } from "../webgpu/renderer";
 import { SIM_HEIGHT, SIM_WIDTH } from "../webgpu/constants";
 import { useSimMouse } from "../webgpu/mouse";
+import type { SimParams } from "../webgpu/params";
 
-export function NeonSmokeCanvas() {
+type Props = {
+  params: SimParams;
+};
+
+export function NeonSmokeCanvasView({ params }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rendererRef = useRef<NeonSmokeRenderer | null>(null);
   const mouseRef = useSimMouse(canvasRef, SIM_WIDTH, SIM_HEIGHT);
+
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    rendererRef.current?.setParams(params);
+  }, [params]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const renderer = new NeonSmokeRenderer(canvas);
+    rendererRef.current = renderer;
 
     let disposed = false;
 
@@ -20,6 +32,7 @@ export function NeonSmokeCanvas() {
       try {
         await renderer.init();
         if (disposed) return;
+        renderer.setParams(params);
         renderer.start(() => mouseRef.current);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -29,12 +42,13 @@ export function NeonSmokeCanvas() {
 
     return () => {
       disposed = true;
+      rendererRef.current = null;
       renderer.destroy();
     };
-  }, [mouseRef]);
+  }, [mouseRef, params]);
 
   return (
-    <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-800/60 shadow-[0_0_120px_rgba(236,72,153,0.4)]">
+    <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-800/60 shadow-[0_0_120px_rgba(236,72,153,0.35)]">
       <canvas ref={canvasRef} className="h-full w-full block" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-slate-950/70 via-transparent to-fuchsia-500/10" />
 

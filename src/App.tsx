@@ -1,4 +1,4 @@
-import { NeonSmokeCanvas } from "./components/NeonSmokeCanvas";
+import { NeonSmokeScene } from "./components/NeonSmokeScene";
 
 export default function App() {
   return (
@@ -14,7 +14,7 @@ export default function App() {
           </span>
         </header>
 
-        <NeonSmokeCanvas />
+        <NeonSmokeScene />
 
         <p className="text-sm text-slate-400">
           If you see nothing, try Chrome or Edge with WebGPU enabled in browser flags.
