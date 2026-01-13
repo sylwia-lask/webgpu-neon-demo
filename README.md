@@ -1,73 +1,109 @@
-# React + TypeScript + Vite
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+# WebGPU Neon Demo
 
-Currently, two official plugins are available:
+Interactive neon smoke / fluid-like simulation built with **WebGPU**, **WGSL**, and **React**.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+This project explores real-time GPU compute techniques in the browser, combining a lightweight fluid-inspired simulation with a clean UI for live parameter control.
 
-## React Compiler
+Live demo:  
+👉 https://sylwia-lask.github.io/webgpu-neon-demo/
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## ✨ Features
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- WebGPU-based compute simulation (no external engines)
+- Real-time interaction with mouse / pointer
+- Adjustable parameters via control panel:
+  - Trail persistence (fade)
+  - Brush size
+  - Color intensity
+  - Swirl strength
+  - Base hue
+  - Hue animation speed
+- Smooth ping-pong simulation using floating-point textures
+- Modern React architecture with separated renderer, canvas, and controls
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+---
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## 🎮 Controls
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- **Move cursor over the canvas** to paint smoke
+- Use the **right-side control panel** to tweak simulation parameters in real time
+- Changes are applied instantly via uniform buffers (no shader recompilation)
+
+---
+
+## 🛠 Tech Stack
+
+- **WebGPU**
+- **WGSL** (compute + render shaders)
+- **React + TypeScript**
+- **Vite**
+- **Tailwind CSS**
+
+---
+
+## 📱 Mobile Support
+
+- Works on devices that support **WebGPU** and **Pointer Events**
+- Desktop browsers (Chrome / Edge) are fully supported
+- Mobile support depends on browser and OS version
+- On unsupported devices, the simulation will not start
+
+---
+
+## 🚀 Development
+
+Install dependencies:
+
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Run locally:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
+
+Build for production:
+
+```bash
+npm run build
+```
+
+---
+
+## 🌍 Deployment
+
+This project is configured for **GitHub Pages** using **GitHub Actions**.
+
+After pushing to the `main` branch, the site is automatically built and deployed.
+
+---
+
+## 🧠 Notes
+
+* The simulation is not a physically accurate fluid solver
+* It is designed for visual experimentation and learning
+* Parameters are intentionally exposed to encourage exploration
+
+---
+
+## 📸 Preview
+
+Move your cursor and experiment with the controls to shape glowing, flowing smoke in real time.
+
+---
+
+## ❤️ Credits
+
+Created as an experiment in GPU-driven visuals and interactive graphics on the web.
+
+---
+
+## 📄 License
+
+MIT
+
