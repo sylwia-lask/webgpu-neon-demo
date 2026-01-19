@@ -16,7 +16,7 @@ export function NeonSmokeScene() {
   const [params, setParams] = useState<SimParams>(DEFAULT_PARAMS);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-4">
       <NeonSmokeCanvasView params={params} />
       <NeonSmokeControls
         params={params}
